@@ -122,6 +122,7 @@ async def search_tmdb(query):
     return d.get("results", [])[:5]
 
 # ---------- MENU ----------
+# ---------- MENU ----------
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     txt = update.message.text
@@ -141,11 +142,12 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📺 Send Series Name:")
         return
 
-    if txt == "📊 Stats":
-    u = db["users"][uid]
-    total = u["search"] + u["bonus"]
+    # ✅ FIX START (indentation correct)
+    if txt == "📊 My Stats":
+        u = db["users"][uid]
+        total = u["search"] + u["bonus"]
 
-    text = f"""╔══════════════════════════════════╗
+        text = f"""╔══════════════════════════════════╗
 ║  📊  Y O U R  S T A T S          ║
 ╚══════════════════════════════════╝
 
@@ -158,17 +160,17 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📅 Joined    : {u['joined']}
 """
 
-    await update.message.reply_text(text)
-    return
+        await update.message.reply_text(text)
+        return
 
     if txt == "👥 Invite":
-    bot_username = (await context.bot.get_me()).username
-    link = f"https://t.me/{bot_username}?start=ref_{uid}"
+        bot_username = (await context.bot.get_me()).username
+        link = f"https://t.me/{bot_username}?start=ref_{uid}"
 
-    u = db["users"][uid]
-    total = u["search"] + u["bonus"]
+        u = db["users"][uid]
+        total = u["search"] + u["bonus"]
 
-    text = f"""╔══════════════════════════════════╗
+        text = f"""╔══════════════════════════════════╗
 ║  👥  R E F E R R A L             ║
 ╚══════════════════════════════════╝
 
@@ -184,18 +186,19 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💡 Every 2 invites = +3 bonus searches ♾️
 """
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Copy Link", url=link)],
-        [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={link}")]
-    ])
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Copy Link", url=link)],
+            [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={link}")]
+        ])
 
-    await update.message.reply_text(text, reply_markup=kb)
-    return
+        await update.message.reply_text(text, reply_markup=kb)
+        return
 
-    if txt == "📩 Request":
+    if txt == "📩 Movie Request":
         context.user_data["mode"] = "req"
         await update.message.reply_text("Send request:")
         return
+    # ✅ FIX END
 
     # SEARCH
     if context.user_data.get("mode") in ["movie", "anime", "series"]:
