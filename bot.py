@@ -184,7 +184,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not results:
             await msg.edit_text("❌ No results found!")
             return
-        buttons = [[InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}")] for r in results]
+        buttons = [[InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}"), 
+                    InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{r['id']}")] for r in results]
         kb = InlineKeyboardMarkup(buttons)
         await msg.edit_text(f"🎯 Results for '{text}':", reply_markup=kb)
         return
@@ -195,10 +196,14 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = None
         return
 
-# ---------- Selection Callback ----------
+# ---------- Selection / Cancel Callback ----------
 async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
+    if data.startswith("cancel_"):
+        await q.message.delete()
+        await q.answer("Cancelled ✅")
+        return
     _, type_, id_ = data.split("_")
     url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
     async with aiohttp.ClientSession() as session:
@@ -208,10 +213,15 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     vote = r.get("vote_average","N/A")
     poster = f"https://image.tmdb.org/t/p/w500{r['poster_path']}" if r.get("poster_path") else POSTER_URL
     watch_url = f"{VIDLINK_BASE}{id_}"
+    # Movie file (if hosted)
+    file_url = f"{MOVIE_FILE_BASE}{title.replace(' ','_')}.mp4"
 
-    await q.message.reply_text(
-        f"🎬 *{title}*\n⭐ Rating: {vote}\n📺 Watch/Download: {watch_url}",
-        parse_mode="Markdown"
+    await q.message.reply_document(
+        document=file_url,
+        filename=f"{title}.mp4",
+        caption=f"🎬 *{title}*\n⭐ Rating: {vote}\n📺 Watch/Download: {watch_url}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{id_}")]])
     )
 
 # ---------- Main ----------
@@ -219,7 +229,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
-    app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_"))
+    app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_|cancel_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
     print("🔥 Cynema Premium Bot Running...")
     app.run_polling()
