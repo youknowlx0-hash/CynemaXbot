@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save(db)
 
     text = f"""╔══════════════════════════════════╗
-║  🎬✨   C Y N E M A  B O T  ║
+║  🎬✨  C I N E V E R S E  B O T  ║
 ╚══════════════════════════════════╝
 
 Hey {name}! 👋 Welcome to the Ultimate Media Bot!
@@ -104,8 +104,8 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ], resize_keyboard=True)
 
     await q.message.reply_photo(
-    START_IMG,
-    caption="""╔══════════════════════════════════╗
+        START_IMG,
+        caption="""╔══════════════════════════════════╗
 ║  🎬  C Y N E M A   M E N U       ║
 ╚══════════════════════════════════╝
 
@@ -117,8 +117,9 @@ Choose what you want to find:
 
 Use the keyboard buttons below to navigate! 👇
 """,
-    reply_markup=kb
-)
+        reply_markup=kb
+    )
+
 # ---------- TMDB SEARCH ----------
 async def search_tmdb(query):
     url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
@@ -127,7 +128,6 @@ async def search_tmdb(query):
             d = await r.json()
     return d.get("results", [])[:5]
 
-# ---------- MENU ----------
 # ---------- MENU ----------
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
@@ -148,7 +148,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📺 Send Series Name:")
         return
 
-    # ✅ FIX START (indentation correct)
     if txt == "📊 My Stats":
         u = db["users"][uid]
         total = u["search"] + u["bonus"]
@@ -204,16 +203,30 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "req"
         await update.message.reply_text("Send request:")
         return
-    # ✅ FIX END
 
-    # SEARCH
+    # SEARCH / NO CREDITS
     if context.user_data.get("mode") in ["movie", "anime", "series"]:
-
         user = db["users"][uid]
         total = user["search"] + user["bonus"]
 
         if total <= 0:
-            await update.message.reply_text("❌ No Credits!")
+            # No credits message with referral buttons
+            bot_username = (await context.bot.get_me()).username
+            link = f"https://t.me/{bot_username}?start=ref_{uid}"
+
+            text = f"""🎬 You've used all your searches! 😔
+
+🎁 Earn more for FREE:
+╠ Invite 2 friends = +3 searches
+╚ Your invites: {user['ref']}
+"""
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Copy Link", url=link)],
+                [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={link}")]
+            ])
+
+            await update.message.reply_text(text, reply_markup=kb)
             return
 
         res = await search_tmdb(txt)
