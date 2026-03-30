@@ -1,5 +1,5 @@
 import json, aiohttp, asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import *
 from telegram.ext import *
 from config import *
@@ -7,203 +7,241 @@ from config import *
 DB_FILE = "db.json"
 
 # ---------- DB ----------
-def load_db():
-    try:
-        return json.load(open(DB_FILE))
-    except:
-        return {"users": {}, "referrals": {}}
+def load():
+    try: return json.load(open(DB_FILE))
+    except: return {"users":{}, "popup":"Join our channel 🔥"}
 
-def save_db(db):
+def save(db):
     json.dump(db, open(DB_FILE,"w"), indent=4)
 
-db = load_db()
+db = load()
 
-# ---------- TMDB SEARCH ----------
-async def search_tmdb(name, type_="movie"):
-    endpoint = "search/tv" if type_=="webseries" else "search/movie"
-    url = f"https://api.themoviedb.org/3/{endpoint}?api_key={TMDB_API_KEY}&query={name}"
+# ---------- USER INIT ----------
+def user_add(uid,name,ref=None):
+    if uid not in db["users"]:
+        db["users"][uid] = {
+            "name":name,
+            "search":START_SEARCH,
+            "bonus":0,
+            "ref":0,
+            "joined":str(datetime.now().date()),
+            "referred":False,
+            "last_popup":None
+        }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as r:
-            data = await r.json()
-
-    results = []
-    for m in data.get("results", [])[:5]:
-        results.append({
-            "id": m["id"],
-            "title": m.get("title") or m.get("name"),
-            "vote": m.get("vote_average","N/A"),
-            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL
-        })
-    return results
+        # referral
+        if ref and ref!=uid and ref in db["users"] and not db["users"][uid]["referred"]:
+            db["users"][uid]["referred"] = True
+            db["users"][ref]["ref"] += 1
+            db["users"][ref]["bonus"] += REF_BONUS
 
 # ---------- FORCE JOIN ----------
-async def check_join(user_id, context):
+async def join_check(bot, uid):
     try:
         for ch in CHANNELS:
-            member = await context.bot.get_chat_member(ch, user_id)
-            if member.status in ["left","kicked"]:
+            m = await bot.get_chat_member(ch, uid)
+            if m.status in ["left","kicked"]:
                 return False
         return True
     except:
         return False
 
 # ---------- START ----------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
+async def start(update:Update, context:ContextTypes.DEFAULT_TYPE):
+    u = str(update.effective_user.id)
+    name = update.effective_user.first_name
 
-    if user_id not in db["users"]:
-        db["users"][user_id] = {
-            "coins":2,"bonus":0,"referrals":0,
-            "joined":str(datetime.now().date()),
-            "referred_by":None
-        }
+    ref = None
+    if context.args:
+        ref = context.args[0].replace("ref_","")
 
-    save_db(db)
+    user_add(u,name,ref)
+    save(db)
 
     text = f"""╔══════════════════════════════════╗
-║ 🎬 C Y N E M A  B O T
+║  🎬✨  C I N E V E R S E  B O T  ║
 ╚══════════════════════════════════╝
 
-Hey {update.effective_user.first_name}! 👋
+Hey {name}! 👋 Welcome to the Ultimate Media Bot!
 
-📌 Join channels & Verify 👇
+🌟 What you can stream & download:
+├ 🎬 Movies
+├ 🌸 Anime
+├ 📺 Web Series
+└ 🌍 All Languages
+
+📌 Join both channels below then verify!
 """
 
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Verify", callback_data="verify")],
-        [InlineKeyboardButton("📺 Channel 1", url=f"https://t.me/{CHANNELS[0][1:]}"),
-         InlineKeyboardButton("📺 Channel 2", url=f"https://t.me/{CHANNELS[1][1:]}")]
+        [InlineKeyboardButton("📢 Join Channel 1", url=f"https://t.me/{CHANNELS[0][1:]}")],
+        [InlineKeyboardButton("📢 Join Channel 2", url=f"https://t.me/{CHANNELS[1][1:]}")],
+        [InlineKeyboardButton("🌐 Website", url=WEBSITE_URL)],
+        [InlineKeyboardButton("🎬 Movies", callback_data="movies")],
+        [InlineKeyboardButton("✅ I AM VERIFIED", callback_data="verify")]
     ])
 
-    await update.message.reply_photo(POSTER_URL, caption=text, reply_markup=kb)
+    await update.message.reply_text(text, reply_markup=kb)
 
 # ---------- VERIFY ----------
-async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def verify(update:Update, context:ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    user_id = str(q.from_user.id)
+    uid = str(q.from_user.id)
 
-    if not await check_join(user_id, context):
+    if not await join_check(context.bot, uid):
         await q.answer("Join channels first ❌")
         return
 
     await q.answer("Verified ✅")
 
-    buttons = [
+    kb = ReplyKeyboardMarkup([
         ["🎬 Movies","🌸 Anime"],
         ["📺 Web Series","👥 Invite"],
         ["📊 Stats","📩 Request"]
-    ]
+    ], resize_keyboard=True)
 
-    await q.message.reply_text("Select option 👇", reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True))
+    await q.message.reply_text("Select option 👇", reply_markup=kb)
+
+# ---------- SEARCH ----------
+async def tmdb(q):
+    url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={q}"
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            d = await r.json()
+    return d.get("results",[])[:5]
 
 # ---------- MENU ----------
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    user_id = str(update.effective_user.id)
+async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
+    uid = str(update.effective_user.id)
+    txt = update.message.text
 
-    if text == "🎬 Movies":
-        context.user_data["mode"] = "movie"
+    # popup 24h
+    now = datetime.now()
+    last = db["users"][uid].get("last_popup")
+    if not last or (now - datetime.fromisoformat(last)) > timedelta(hours=24):
+        await update.message.reply_text(f"📢 {db.get('popup','Join channel')}")
+        db["users"][uid]["last_popup"] = now.isoformat()
+        save(db)
+
+    if txt=="🎬 Movies":
+        context.user_data["mode"]="movie"
         await update.message.reply_text("Send movie name:")
         return
 
-    if text == "🌸 Anime":
-        context.user_data["mode"] = "anime"
-        await update.message.reply_text("Send anime name:")
+    if txt=="📊 Stats":
+        u=db["users"][uid]
+        await update.message.reply_text(f"""╔══════════════════════════════════╗
+║  📊  Y O U R  S T A T S
+╚══════════════════════════════════╝
+
+👤 {u['name']}
+🆔 {uid}
+🔍 {u['search']}
+🎁 {u['bonus']}
+👥 {u['ref']}
+📅 {u['joined']}
+""")
         return
 
-    if text == "📺 Web Series":
-        context.user_data["mode"] = "webseries"
-        await update.message.reply_text("Send series name:")
+    if txt=="👥 Invite":
+        link=f"https://t.me/YOUR_BOT?start=ref_{uid}"
+        u=db["users"][uid]
+        await update.message.reply_text(f"""╔══════════════════════════════════╗
+║  👥  R E F E R R A L
+╚══════════════════════════════════╝
+
+{link}
+
+Invites: {u['ref']}
+Bonus: {u['bonus']}
+""")
         return
 
-    if text == "📩 Request":
-        context.user_data["mode"] = "request"
-        await update.message.reply_text("Send request name:")
+    if txt=="📩 Request":
+        context.user_data["mode"]="req"
+        await update.message.reply_text("Send request:")
         return
 
-    if text == "📊 Stats":
-        u = db["users"][user_id]
-        await update.message.reply_text(f"Search: {u['coins']} | Referrals: {u['referrals']}")
-        return
+    # SEARCH
+    if context.user_data.get("mode")=="movie":
+        res = await tmdb(txt)
+        btn = [[InlineKeyboardButton(i["title"], callback_data=f"m_{i['id']}")] for i in res]
+        btn.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+        await update.message.reply_text("Select:", reply_markup=InlineKeyboardMarkup(btn))
 
-    # ---------- SEARCH ----------
-    mode = context.user_data.get("mode")
-
-    if mode in ["movie","anime","webseries"]:
-        msg = await update.message.reply_text("🔍 Searching...")
-        results = await search_tmdb(text, mode)
-
-        if not results:
-            await msg.edit_text("No results ❌")
-            return
-
-        buttons = []
-        for r in results:
-            buttons.append([
-                InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}"),
-                InlineKeyboardButton("❌", callback_data=f"cancel")
-            ])
-
-        await msg.edit_text("Select movie 👇", reply_markup=InlineKeyboardMarkup(buttons))
-
-    # ---------- REQUEST ----------
-    if mode == "request":
-        await context.bot.send_message(ADMIN_ID, f"Request: {text}")
+    if context.user_data.get("mode")=="req":
+        await context.bot.send_message(ADMIN_ID,f"Request from {uid}: {txt}")
         await update.message.reply_text("Sent ✅")
-        context.user_data.clear()
 
 # ---------- SELECT ----------
-async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
 
-    if data == "cancel":
-        context.user_data.clear()
+    if data=="cancel":
         await q.message.delete()
         return
 
-    _, type_, id_ = data.split("_")
+    mid = data.split("_")[1]
 
-    url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
+    url=f"https://api.themoviedb.org/3/movie/{mid}?api_key={TMDB_API_KEY}"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as r:
-            m = await r.json()
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            m=await r.json()
 
-    title = m.get("title") or m.get("name")
-    vote = m.get("vote_average","N/A")
-    poster = f"https://image.tmdb.org/t/p/w500{m['poster_path']}"
+    title=m.get("title")
+    year=m.get("release_date","")[:4]
+    rating=m.get("vote_average")
+    overview=m.get("overview","")
 
-    watch = f"{VIDLINK_BASE}{id_}"
+    watch=f"{VIDLINK_BASE}{mid}"
 
-    await q.message.reply_photo(
-        photo=poster,
-        caption=f"🎬 {title}\n⭐ {vote}\n\nWatch 👇",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("▶️ Watch", url=watch)],
-            [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
-        ])
-    )
+    await q.message.reply_text(f"""🎬 {title}
+📅 {year}
+⭐ {rating}
+
+{overview[:200]}...
+
+▶️ {watch}
+""")
+
+# ---------- ADMIN ----------
+async def admin(update:Update, context:ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id!=ADMIN_ID: return
+
+    txt = update.message.text
+
+    if txt.startswith("/broadcast"):
+        msg = txt.replace("/broadcast ","")
+        for u in db["users"]:
+            try:
+                await context.bot.send_message(u,msg)
+            except: pass
+
+    if txt.startswith("/popup"):
+        db["popup"]=txt.replace("/popup ","")
+        save(db)
+        await update.message.reply_text("Popup updated")
 
 # ---------- MAIN ----------
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # 🔥 FIX ERROR
     await app.bot.delete_webhook(drop_pending_updates=True)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
-    app.add_handler(CallbackQueryHandler(selection_callback, pattern="^(sel_|cancel)"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
+    app.add_handler(CallbackQueryHandler(select))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu))
+    app.add_handler(MessageHandler(filters.COMMAND, admin))
 
-    print("Bot Running 🚀")
+    print("🔥 Cineverse Bot Running")
 
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
     await asyncio.Event().wait()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     asyncio.run(main())
