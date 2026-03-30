@@ -5,32 +5,37 @@ from telegram.ext import *
 from config import *
 
 DB_FILE = "db.json"
+db = {}
 
 # --------- DB ----------
 def load_db():
+    global db
     try:
-        return json.load(open(DB_FILE))
+        db = json.load(open(DB_FILE))
     except:
-        return {"users": {}, "referrals": {}}
+        db = {"users": {}, "referrals": {}}
+    return db
 
-def save_db(db):
+def save_db():
     json.dump(db, open(DB_FILE, "w"), indent=4)
 
-db = load_db()
+load_db()
 
 # --------- TMDB Search ----------
-def search_movie(name):
-    url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={name}"
+def search_movie(name, type_="movie"):
+    # type_: movie/anime/webseries
+    url = f"https://api.themoviedb.org/3/search/{'tv' if type_=='webseries' else 'movie'}?api_key={TMDB_API_KEY}&query={name}"
     r = requests.get(url).json()
-    if r.get("results"):
-        m = r["results"][0]
-        return {
-            "title": m["title"],
-            "vote": m["vote_average"],
-            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get('poster_path') else None,
-            "link": f"https://www.themoviedb.org/movie/{m['id']}"
-        }
-    return None
+    results = []
+    for m in r.get("results", [])[:5]:  # top 5 results
+        results.append({
+            "id": m["id"],
+            "title": m["name"] if "name" in m else m["title"],
+            "vote": m.get("vote_average", "N/A"),
+            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL,
+            "link": f"https://www.themoviedb.org/movie/{m['id']}" if type_!="webseries" else f"https://www.themoviedb.org/tv/{m['id']}"
+        })
+    return results
 
 # --------- Force Join ----------
 async def check_join(user_id, context):
@@ -43,28 +48,9 @@ async def check_join(user_id, context):
 # --------- Start ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
-    ref_code = None
-    if context.args:
-        ref_code = context.args[0].replace("ref_", "")
-
     if user_id not in db["users"]:
-        db["users"][user_id] = {
-            "coins": 2,
-            "bonus": 0,
-            "referrals": 0,
-            "joined": str(datetime.now().date()),
-            "history": [],
-            "watchlist": []
-        }
-        save_db(db)
-
-    # Handle referral
-    if ref_code and ref_code in db["users"] and ref_code != user_id:
-        db["users"][ref_code]["referrals"] += 1
-        db["users"][ref_code]["bonus"] += 3
-        save_db(db)
-
-    # Poster + description
+        db["users"][user_id] = {"coins":2, "bonus":0, "referrals":0, "joined":str(datetime.now().date()), "history":[], "watchlist":[]}
+        save_db()
     poster_text = f"""╔══════════════════════════════════╗
 ║  🎬✨  C Y N E M A  B O T       ║
 ╚══════════════════════════════════╝
@@ -72,9 +58,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Hey {update.effective_user.first_name}! 👋 Welcome to the Ultimate Media Bot!
 
 🌟 Stream & download:
-├ 🎬 Movies (Hollywood/Bollywood)
-├ 🌸 Anime — subbed & dubbed
-├ 📺 Web Series — Netflix, Prime, Disney+
+├ 🎬 Movies
+├ 🌸 Anime
+├ 📺 Web Series
 └ 🌍 All Languages
 
 📌 Join both channels below, then tap ✅ Verify!
@@ -91,13 +77,10 @@ Hey {update.effective_user.first_name}! 👋 Welcome to the Ultimate Media Bot!
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     user_id = str(q.from_user.id)
-    joined = await check_join(user_id, context)
-    if not joined:
+    if not await check_join(user_id, context):
         await q.answer("❌ Join all channels first!")
         return
     await q.answer("✅ Verified!")
-
-    # Main Menu
     menu_text = f"""╔══════════════════════════════════╗
 ║  🎬  C Y N E M A  M E N U        ║
 ╚══════════════════════════════════╝
@@ -116,7 +99,7 @@ Use the keyboard below!
     kb = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     await q.message.reply_text(menu_text, reply_markup=kb)
 
-# --------- Menu / Keyboard Handler ----------
+# --------- Menu Handler ----------
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     text = update.message.text
@@ -173,68 +156,65 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
         return
     if text == "🔔 Request Movie/Anime":
-        await update.message.reply_text(
-            "Please type the exact name of the movie, anime, or web series you want to request from the admins:"
-        )
+        await update.message.reply_text("Please type the exact name of the movie, anime, or web series you want to request:")
         context.user_data["mode"] = "request"
         return
 
-    # Handle movie/anime/webseries/request input
-    if mode in ["movie", "anime", "webseries"]:
-        movie_info = search_movie(text)
-        if not movie_info:
+    # ---- Handle searches ----
+    if mode in ["movie","anime","webseries"]:
+        results = search_movie(text, mode)
+        if not results:
             await update.message.reply_text("❌ Not found!")
             return
-
-        stats = db["users"][user_id]
-        if stats["coins"] <= 0:
-            await update.message.reply_text("❌ No coins left!")
-            return
-        stats["coins"] -= 1
-        stats["history"].append(movie_info["title"])
-        save_db(db)
-
-        msg = await update.message.reply_photo(
-            movie_info["poster"] if movie_info["poster"] else POSTER_URL,
-            caption=f"🎬 {movie_info['title']}\n⭐ {movie_info['vote']}\n📎 Link: {movie_info['link']}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{user_id}")]
-            ])
-        )
-        await asyncio.sleep(50)
-        try:
-            await msg.delete()
-        except:
-            pass
+        buttons = [[InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}")] for r in results]
+        kb = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text(f"🎯 Results for '{text}':", reply_markup=kb)
         return
 
     if mode == "request":
-        await update.message.reply_text(
-            f"✅ Your request '{text}' has been sent to the admins!"
-        )
+        # Forward request to admin
+        await context.bot.send_message(ADMIN_ID, f"📌 Request from {update.effective_user.first_name} ({user_id}): {text}")
+        await update.message.reply_text("✅ Your request has been sent to the admins!")
         context.user_data["mode"] = None
         return
 
-# --------- Cancel Callback ----------
-async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --------- Selection Callback ----------
+async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    data = q.data  # sel_movie_12345
+    _, type_, id_ = data.split("_")
+    # get details from TMDB
+    url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
+    r = requests.get(url).json()
+    title = r.get("title") or r.get("name")
+    vote = r.get("vote_average","N/A")
+    poster = f"https://image.tmdb.org/t/p/w500{r['poster_path']}" if r.get("poster_path") else POSTER_URL
+    link = f"https://www.themoviedb.org/movie/{id_}" if type_!="webseries" else f"https://www.themoviedb.org/tv/{id_}"
+    msg = await q.message.reply_photo(poster, caption=f"🎬 {title}\n⭐ {vote}\n📎 Link: {link}", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel")]
+    ]))
+    await asyncio.sleep(50)
     try:
-        await q.message.delete()
-        await q.answer("✅ Deleted!")
-    except:
-        await q.answer("❌ Already deleted")
+        await msg.delete()
+    except: pass
+
+# --------- Cancel ----------
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try: await q.message.delete()
+    except: pass
+    await q.answer("✅ Deleted!")
 
 # --------- Main ----------
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
-    app.add_handler(CallbackQueryHandler(cancel_callback, pattern="cancel_"))
+    app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_"))
+    app.add_handler(CallbackQueryHandler(cancel, pattern="cancel"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
-
-    print("Cynema Premium Bot is running...")
+    print("Cynema Premium Bot running...")
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
