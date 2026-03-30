@@ -7,7 +7,7 @@ from config import *
 DB_FILE = "db.json"
 db = {}
 
-# --------- DB ----------
+# ---------- DB ----------
 def load_db():
     global db
     try:
@@ -21,24 +21,24 @@ def save_db():
 
 load_db()
 
-# --------- Async TMDB Search ----------
-async def search_movie(name, type_="movie"):
+# ---------- Async TMDB Search ----------
+async def search_tmdb(name, type_="movie"):
     endpoint = "search/tv" if type_=="webseries" else "search/movie"
     url = f"https://api.themoviedb.org/3/{endpoint}?api_key={TMDB_API_KEY}&query={name}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as r:
-            r = await r.json()
+            data = await r.json()
     results = []
-    for m in r.get("results", [])[:5]:
+    for m in data.get("results", [])[:5]:
         results.append({
             "id": m["id"],
-            "title": m.get("name") or m.get("title"),
+            "title": m.get("title") or m.get("name"),
             "vote": m.get("vote_average","N/A"),
             "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL
         })
     return results
 
-# --------- Force Join ----------
+# ---------- Force Join Check ----------
 async def check_join(user_id, context):
     for ch in CHANNELS:
         member = await context.bot.get_chat_member(ch, user_id)
@@ -46,7 +46,7 @@ async def check_join(user_id, context):
             return False
     return True
 
-# --------- Start & Referral ----------
+# ---------- Start + Referral ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     args = context.args
@@ -57,7 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in db["users"]:
         db["users"][user_id] = {"coins":2,"bonus":0,"referrals":0,"joined":str(datetime.now().date()),"history":[],"watchlist":[],"referred_by":None}
 
-        # Unique referral logic
+        # Unique referral
         if referred_id and referred_id != user_id and db["users"][user_id]["referred_by"] is None:
             db["users"][user_id]["referred_by"] = referred_id
             db["users"][referred_id]["referrals"] += 1
@@ -72,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ║  🎬✨  C Y N E M A  B O T       ║
 ╚══════════════════════════════════╝
 
-Hey {update.effective_user.first_name}! 👋 Welcome to the Ultimate Media Bot!
+Hey {update.effective_user.first_name}! 👋 Welcome to Cynema Bot Premium!
 
 🌟 Stream & download:
 ├ 🎬 Movies
@@ -80,7 +80,7 @@ Hey {update.effective_user.first_name}! 👋 Welcome to the Ultimate Media Bot!
 ├ 📺 Web Series
 └ 🌍 All Languages
 
-📌 Join both channels below, then tap ✅ Verify!
+📌 Join channels below and tap ✅ Verify!
 """
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Verify", callback_data="verify")],
@@ -90,7 +90,7 @@ Hey {update.effective_user.first_name}! 👋 Welcome to the Ultimate Media Bot!
     ])
     await update.message.reply_photo(POSTER_URL, caption=poster_text, reply_markup=keyboard)
 
-# --------- Verify ----------
+# ---------- Verify ----------
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     user_id = str(q.from_user.id)
@@ -116,7 +116,7 @@ Use the keyboard below!
     kb = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     await q.message.reply_text(menu_text, reply_markup=kb)
 
-# --------- Menu Handler ----------
+# ---------- Menu Handler ----------
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     text = update.message.text
@@ -177,10 +177,10 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "request"
         return
 
-    # ---- Handle searches with async processing ----
+    # ---- Handle searches ----
     if mode in ["movie","anime","webseries"]:
-        msg = await update.message.reply_text("⚡ Searching in Cynema Database...")
-        results = await search_movie(text, mode)
+        msg = await update.message.reply_text(f"⚡ Searching for '{text}' ...")
+        results = await search_tmdb(text, mode)
         if not results:
             await msg.edit_text("❌ No results found!")
             return
@@ -195,12 +195,11 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = None
         return
 
-# --------- Selection Callback ----------
+# ---------- Selection Callback ----------
 async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
     _, type_, id_ = data.split("_")
-    # Fetch info from TMDB async
     url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as r:
@@ -210,32 +209,19 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     poster = f"https://image.tmdb.org/t/p/w500{r['poster_path']}" if r.get("poster_path") else POSTER_URL
     watch_url = f"{VIDLINK_BASE}{id_}"
 
-    msg = await q.message.reply_text(
+    await q.message.reply_text(
         f"🎬 *{title}*\n⭐ Rating: {vote}\n📺 Watch/Download: {watch_url}",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel")]])
+        parse_mode="Markdown"
     )
-    await asyncio.sleep(50)
-    try:
-        await msg.delete()
-    except: pass
 
-# --------- Cancel ----------
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    try: await q.message.delete()
-    except: pass
-    await q.answer("✅ Deleted!")
-
-# --------- Main ----------
+# ---------- Main ----------
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
     app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_"))
-    app.add_handler(CallbackQueryHandler(cancel, pattern="cancel"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
-    print("🔥 Cynema Premium Fast Bot running...")
+    print("🔥 Cynema Premium Bot Running...")
     app.run_polling()
 
 if __name__=="__main__":
