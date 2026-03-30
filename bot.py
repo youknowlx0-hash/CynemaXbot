@@ -146,7 +146,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
 🔍 Searches Left: {total}
   ├ 🆓 Free: {u['search']}
-  └ 🎁 Bonus: {u['bonus']
+  └ 🎁 Bonus: {u['bonus']}
 
 👥 Referrals: {u['ref']}
 📅 Joined: {u['joined']}
