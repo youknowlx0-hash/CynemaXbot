@@ -256,22 +256,14 @@ async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
 # ---------- MAIN ----------
 async def main():
-    app=Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    await app.bot.delete_webhook(drop_pending_updates=True)
-
-    app.add_handler(CommandHandler("start",start))
-    app.add_handler(CallbackQueryHandler(verify,pattern="verify"))
-    app.add_handler(CallbackQueryHandler(movies_btn,pattern="movies"))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
+    app.add_handler(CallbackQueryHandler(movies_btn, pattern="movies"))
     app.add_handler(CallbackQueryHandler(select))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,menu))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu))
 
     print("🔥 Cynema Bot Running")
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await asyncio.Event().wait()
-
-if __name__=="__main__":
-    asyncio.run(main())
+    await app.run_polling()
