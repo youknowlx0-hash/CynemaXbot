@@ -1,4 +1,8 @@
 {
   "users": {},
-  "referrals": {}
+  "popup": "📢 Join our official channel for latest updates 🔥",
+  "admin_settings": {
+    "referral_reward": 3,
+    "daily_popup_enabled": true
+  }
 }
