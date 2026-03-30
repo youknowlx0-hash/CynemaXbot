@@ -59,13 +59,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(uid, name, ref)
     save(db)
 
-    text = f"""🎬 *CYNEMA BOT*
+    text = f"""╔══════════════════════════════════╗
+║  🎬✨  C I N E V E R S E  B O T  ║
+╚══════════════════════════════════╝
 
-Hey {name}! 👋
+Hey {name}! 👋 Welcome to the Ultimate Media Bot!
 
-🎥 Movies | 🌸 Anime | 📺 Web Series
+🌟 What you can stream & download:
+├ 🎬 Hollywood / Bollywood Movies
+├ 🌸 Anime — subbed & dubbed
+├ 📺 Web Series — Netflix, Amazon+
+└ 🌍 All Languages — Hindi, Eng, Jp, Kr...
 
-👇 Join & Verify First
+📌 Join both channels below, then tap ✅ Verify!
 """
 
     kb = InlineKeyboardMarkup([
