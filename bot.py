@@ -6,10 +6,12 @@ from config import *
 
 DB_FILE = "db.json"
 
-# ---------- DB ----------
+# ---------- DATABASE ----------
 def load():
-    try: return json.load(open(DB_FILE))
-    except: return {"users":{}}
+    try:
+        return json.load(open(DB_FILE))
+    except:
+        return {"users":{}}
 
 def save(db):
     json.dump(db, open(DB_FILE,"w"), indent=4)
@@ -33,11 +35,11 @@ def add_user(uid,name,ref=None):
             db["users"][ref]["ref"]+=1
             db["users"][ref]["bonus"]+=REF_BONUS
 
-# ---------- JOIN CHECK ----------
+# ---------- FORCE JOIN ----------
 async def check_join(bot,uid):
     try:
         for ch in CHANNELS:
-            m=await bot.get_chat_member(ch,uid)
+            m = await bot.get_chat_member(ch,uid)
             if m.status in ["left","kicked"]:
                 return False
         return True
@@ -46,34 +48,39 @@ async def check_join(bot,uid):
 
 # ---------- START ----------
 async def start(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    u=str(update.effective_user.id)
+    uid=str(update.effective_user.id)
     name=update.effective_user.first_name
 
     ref=None
     if context.args:
         ref=context.args[0].replace("ref_","")
 
-    add_user(u,name,ref)
+    add_user(uid,name,ref)
     save(db)
 
     text=f"""╔══════════════════════════════════╗
 ║   🎬✨  C Y N E M A   B O T      ║
 ╚══════════════════════════════════╝
 
-Hey {name}! 👋 Welcome!
+Hey {name}! 👋
 
-🎬 Movies | 🌸 Anime | 📺 Web Series
-🌍 Multi Language | ⚡ Fast Links
+🌟 Stream & Download:
+├ 🎬 Movies
+├ 🌸 Anime
+├ 📺 Web Series
+└ 🌍 All Languages
 
-📌 Join channels & Verify 👇
+⚡ Fast • Clean • Premium
+
+📌 Join & Verify 👇
 """
 
     kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
-        [InlineKeyboardButton("📢 Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
+        [InlineKeyboardButton("📢 Join  Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
+        [InlineKeyboardButton("📢 Join Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
         [
-            InlineKeyboardButton("🌐 Website",url=WEBSITE_URL),
-            InlineKeyboardButton("🎬 Movies",callback_data="movies")
+            InlineKeyboardButton("🌐 Instagram",url=WEBSITE_URL),
+            InlineKeyboardButton(" Earning Adda",url=MOVIES_URL)
         ],
         [InlineKeyboardButton("✅ VERIFY",callback_data="verify")]
     ])
@@ -94,7 +101,7 @@ async def verify(update:Update, context:ContextTypes.DEFAULT_TYPE):
     kb=ReplyKeyboardMarkup([
         ["🎬 Movies","🌸 Anime"],
         ["📺 Web Series","👥 Invite"],
-        ["📊 Stats","📩 Request"]
+        ["📊 Stats","📩 Request Movie"]
     ],resize_keyboard=True)
 
     await q.message.reply_text("🎉 Welcome to Cynema Bot!\n\nSelect option 👇",reply_markup=kb)
@@ -113,8 +120,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
     txt=update.message.text
 
     if txt=="🎬 Movies":
-        context.user_data["mode"]="movie"
-        await update.message.reply_text("🎬 Send Movie Name:")
+        await update.message.reply_text(f"🎬 Watch Movies:\n{MOVIES_URL}")
         return
 
     if txt=="🌸 Anime":
@@ -129,14 +135,19 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
     if txt=="📊 Stats":
         u=db["users"][uid]
+        total=u["search"]+u["bonus"]
+
         await update.message.reply_text(f"""╔══════════════════════════════════╗
 ║  📊  Y O U R  S T A T S
 ╚══════════════════════════════════╝
 
 👤 {u['name']}
 🆔 {uid}
-🔍 Searches: {u['search']}
-🎁 Bonus: {u['bonus']}
+
+🔍 Searches Left: {total}
+  ├ 🆓 Free: {u['search']}
+  └ 🎁 Bonus: {u['bonus']
+
 👥 Referrals: {u['ref']}
 📅 Joined: {u['joined']}
 """)
@@ -164,23 +175,46 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📩 Send your request:")
         return
 
-    # SEARCH
-    if context.user_data.get("mode") in ["movie","anime","series"]:
+    # SEARCH WITH CREDIT
+    if context.user_data.get("mode") in ["anime","series"]:
+
+        user=db["users"][uid]
+        total=user["search"]+user["bonus"]
+
+        if total<=0:
+            bot_username=(await context.bot.get_me()).username
+            link=f"https://t.me/{bot_username}?start=ref_{uid}"
+
+            await update.message.reply_text(f"""❌ No Credits Left!
+
+👥 Invite friends:
+{link}
+""")
+            return
+
         res=await search_tmdb(txt)
 
         if not res:
             await update.message.reply_text("❌ No Results Found")
             return
 
+        # cut credit
+        if user["bonus"]>0:
+            user["bonus"]-=1
+        else:
+            user["search"]-=1
+
+        save(db)
+
         btn=[[InlineKeyboardButton(i.get("title") or i.get("name"),callback_data=f"id_{i['id']}")] for i in res]
 
         btn.append([InlineKeyboardButton("❌ Cancel",callback_data="cancel")])
 
-        await update.message.reply_text("🎯 Select Result:",reply_markup=InlineKeyboardMarkup(btn))
+        await update.message.reply_text("🎯 Select:",reply_markup=InlineKeyboardMarkup(btn))
 
     if context.user_data.get("mode")=="req":
         await context.bot.send_message(ADMIN_ID,f"📩 Request from {uid}:\n{txt}")
-        await update.message.reply_text("✅ Request sent")
+        await update.message.reply_text("✅ Sent")
 
 # ---------- SELECT ----------
 async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
@@ -200,8 +234,8 @@ async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
         async with s.get(url) as r:
             m=await r.json()
 
-    title=m.get("title")
-    year=m.get("release_date","")[:4]
+    title=m.get("title") or m.get("name")
+    year=(m.get("release_date") or "")[:4]
     rating=m.get("vote_average")
     overview=m.get("overview","")
 
@@ -209,12 +243,11 @@ async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
     await q.message.reply_text(f"""🎬 {title} ({year})
 
-⭐ Rating: {rating}
+⭐ {rating}
 
-📝 {overview[:300]}...
+📝 {overview[:250]}...
 
-🔗 Watch:
-{link}
+🔗 {link}
 """)
 
 # ---------- MAIN ----------
