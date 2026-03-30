@@ -6,4 +6,4 @@ INSTAGRAM_URL = "https://www.instagram.com/h3xshadow?"
 CHANNELS = ["@CynemaXOfficial", "@H3xShadow"]  # Force join channels
 ADMIN_ID = 6813806104
 VIDLINK_BASE = "https://vidlink.pro/movie/"
-MOVIE_FILE_BASE = "https://yourserver.com/movies/"
+MOVIE_FILE_BASE = "https://drive.google.com/uc?export=download&id="
