@@ -70,17 +70,15 @@ Hey {name}! 👋
 ├ 📺 Web Series
 └ 🌍 All Languages
 
-⚡ Fast • Clean • Premium
-
 📌 Join & Verify 👇
 """
 
     kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Join  Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
-        [InlineKeyboardButton("📢 Join Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
+        [InlineKeyboardButton("📢 Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
+        [InlineKeyboardButton("📢 Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
         [
-            InlineKeyboardButton("🌐 Instagram",url=WEBSITE_URL),
-            InlineKeyboardButton(" Earning Adda",url=MOVIES_URL)
+            InlineKeyboardButton("🌐 Website",url=WEBSITE_URL),
+            InlineKeyboardButton("🎬 Movies",callback_data="movies")
         ],
         [InlineKeyboardButton("✅ VERIFY",callback_data="verify")]
     ])
@@ -99,12 +97,21 @@ async def verify(update:Update, context:ContextTypes.DEFAULT_TYPE):
     await q.answer("Verified ✅")
 
     kb=ReplyKeyboardMarkup([
-        ["🎬 Movies","🌸 Anime"],
-        ["📺 Web Series","👥 Invite"],
-        ["📊 Stats","📩 Request Movie"]
+        ["🌸 Anime","📺 Web Series"],
+        ["👥 Invite","📊 Stats"],
+        ["📩 Request"]
     ],resize_keyboard=True)
 
-    await q.message.reply_text("🎉 Welcome to Cynema Bot!\n\nSelect option 👇",reply_markup=kb)
+    await q.message.reply_text("🎉 Welcome! Select option 👇",reply_markup=kb)
+
+# ---------- MOVIE BUTTON ----------
+async def movies_btn(update:Update, context:ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    context.user_data["mode"] = "movie"
+
+    await q.message.reply_text("🎬 Send Movie Name:")
 
 # ---------- TMDB ----------
 async def search_tmdb(q):
@@ -118,10 +125,6 @@ async def search_tmdb(q):
 async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
     uid=str(update.effective_user.id)
     txt=update.message.text
-
-    if txt=="🎬 Movies":
-        await update.message.reply_text(f"🎬 Watch Movies:\n{MOVIES_URL}")
-        return
 
     if txt=="🌸 Anime":
         context.user_data["mode"]="anime"
@@ -159,9 +162,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
         u=db["users"][uid]
 
-        await update.message.reply_text(f"""╔══════════════════════════════════╗
-║  👥  R E F E R R A L
-╚══════════════════════════════════╝
+        await update.message.reply_text(f"""👥 Referral System
 
 🔗 {link}
 
@@ -175,8 +176,8 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📩 Send your request:")
         return
 
-    # SEARCH WITH CREDIT
-    if context.user_data.get("mode") in ["anime","series"]:
+    # ---------- SEARCH ----------
+    if context.user_data.get("mode") in ["movie","anime","series"]:
 
         user=db["users"][uid]
         total=user["search"]+user["bonus"]
@@ -187,7 +188,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(f"""❌ No Credits Left!
 
-👥 Invite friends:
+Invite friends:
 {link}
 """)
             return
@@ -198,7 +199,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ No Results Found")
             return
 
-        # cut credit
+        # deduct credit
         if user["bonus"]>0:
             user["bonus"]-=1
         else:
@@ -207,11 +208,11 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
         save(db)
 
         btn=[[InlineKeyboardButton(i.get("title") or i.get("name"),callback_data=f"id_{i['id']}")] for i in res]
-
         btn.append([InlineKeyboardButton("❌ Cancel",callback_data="cancel")])
 
         await update.message.reply_text("🎯 Select:",reply_markup=InlineKeyboardMarkup(btn))
 
+    # ---------- REQUEST ----------
     if context.user_data.get("mode")=="req":
         await context.bot.send_message(ADMIN_ID,f"📩 Request from {uid}:\n{txt}")
         await update.message.reply_text("✅ Sent")
@@ -224,6 +225,9 @@ async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
     if data=="cancel":
         context.user_data.clear()
         await q.message.delete()
+        return
+
+    if data=="movies":
         return
 
     mid=data.split("_")[1]
@@ -258,6 +262,7 @@ async def main():
 
     app.add_handler(CommandHandler("start",start))
     app.add_handler(CallbackQueryHandler(verify,pattern="verify"))
+    app.add_handler(CallbackQueryHandler(movies_btn,pattern="movies"))
     app.add_handler(CallbackQueryHandler(select))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,menu))
 
