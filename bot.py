@@ -23,17 +23,15 @@ load_db()
 
 # --------- TMDB Search ----------
 def search_movie(name, type_="movie"):
-    # type_: movie/anime/webseries
-    url = f"https://api.themoviedb.org/3/search/{'tv' if type_=='webseries' else 'movie'}?api_key={TMDB_API_KEY}&query={name}"
+    url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}?api_key={TMDB_API_KEY}&query={name}"
     r = requests.get(url).json()
     results = []
-    for m in r.get("results", [])[:5]:  # top 5 results
+    for m in r.get("results", [])[:5]:
         results.append({
             "id": m["id"],
-            "title": m["name"] if "name" in m else m["title"],
-            "vote": m.get("vote_average", "N/A"),
-            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL,
-            "link": f"https://www.themoviedb.org/movie/{m['id']}" if type_!="webseries" else f"https://www.themoviedb.org/tv/{m['id']}"
+            "title": m.get("name") or m.get("title"),
+            "vote": m.get("vote_average","N/A"),
+            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL
         })
     return results
 
@@ -41,7 +39,7 @@ def search_movie(name, type_="movie"):
 async def check_join(user_id, context):
     for ch in CHANNELS:
         member = await context.bot.get_chat_member(ch, user_id)
-        if member.status in ["left", "kicked"]:
+        if member.status in ["left","kicked"]:
             return False
     return True
 
@@ -49,8 +47,9 @@ async def check_join(user_id, context):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if user_id not in db["users"]:
-        db["users"][user_id] = {"coins":2, "bonus":0, "referrals":0, "joined":str(datetime.now().date()), "history":[], "watchlist":[]}
+        db["users"][user_id] = {"coins":2,"bonus":0,"referrals":0,"joined":str(datetime.now().date()),"history":[],"watchlist":[]}
         save_db()
+
     poster_text = f"""╔══════════════════════════════════╗
 ║  🎬✨  C Y N E M A  B O T       ║
 ╚══════════════════════════════════╝
@@ -92,9 +91,9 @@ Choose what you want to find:
 Use the keyboard below!
 """
     buttons = [
-        ["🎬 Movies", "🌸 Anime"],
-        ["📺 Web Series", "👥 Invite Friends"],
-        ["📊 My Stats", "🔔 Request Movie/Anime"]
+        ["🎬 Movies","🌸 Anime"],
+        ["📺 Web Series","👥 Invite Friends"],
+        ["📊 My Stats","🔔 Request Movie/Anime"]
     ]
     kb = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     await q.message.reply_text(menu_text, reply_markup=kb)
@@ -106,15 +105,15 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
 
     if text == "🎬 Movies":
-        await update.message.reply_text("Send Movie Name:")
+        await update.message.reply_text("🔎 Send Movie Name:")
         context.user_data["mode"] = "movie"
         return
     if text == "🌸 Anime":
-        await update.message.reply_text("Send Anime Name:")
+        await update.message.reply_text("🔎 Send Anime Name:")
         context.user_data["mode"] = "anime"
         return
     if text == "📺 Web Series":
-        await update.message.reply_text("Send Web Series Name:")
+        await update.message.reply_text("🔎 Send Web Series Name:")
         context.user_data["mode"] = "webseries"
         return
     if text == "👥 Invite Friends":
@@ -160,19 +159,22 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "request"
         return
 
-    # ---- Handle searches ----
+    # ---- Handle searches with "processing" animation ----
     if mode in ["movie","anime","webseries"]:
+        msg = await update.message.reply_text("⚡ Processing your search...")
+        await asyncio.sleep(1)  # simulate processing animation
+        await msg.edit_text("⚡ Searching in Cynema Database...")
+        await asyncio.sleep(1)
         results = search_movie(text, mode)
         if not results:
-            await update.message.reply_text("❌ Not found!")
+            await msg.edit_text("❌ No results found!")
             return
         buttons = [[InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}")] for r in results]
         kb = InlineKeyboardMarkup(buttons)
-        await update.message.reply_text(f"🎯 Results for '{text}':", reply_markup=kb)
+        await msg.edit_text(f"🎯 Results for '{text}':", reply_markup=kb)
         return
 
     if mode == "request":
-        # Forward request to admin
         await context.bot.send_message(ADMIN_ID, f"📌 Request from {update.effective_user.first_name} ({user_id}): {text}")
         await update.message.reply_text("✅ Your request has been sent to the admins!")
         context.user_data["mode"] = None
@@ -181,18 +183,20 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --------- Selection Callback ----------
 async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    data = q.data  # sel_movie_12345
+    data = q.data
     _, type_, id_ = data.split("_")
-    # get details from TMDB
     url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
     r = requests.get(url).json()
     title = r.get("title") or r.get("name")
     vote = r.get("vote_average","N/A")
     poster = f"https://image.tmdb.org/t/p/w500{r['poster_path']}" if r.get("poster_path") else POSTER_URL
-    link = f"https://www.themoviedb.org/movie/{id_}" if type_!="webseries" else f"https://www.themoviedb.org/tv/{id_}"
-    msg = await q.message.reply_photo(poster, caption=f"🎬 {title}\n⭐ {vote}\n📎 Link: {link}", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel")]
-    ]))
+    watch_url = f"{VIDLINK_BASE}{id_}"
+
+    msg = await q.message.reply_text(
+        f"🎬 *{title}*\n⭐ Rating: {vote}\n📺 Watch/Download: {watch_url}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel")]])
+    )
     await asyncio.sleep(50)
     try:
         await msg.delete()
@@ -213,7 +217,7 @@ def main():
     app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_"))
     app.add_handler(CallbackQueryHandler(cancel, pattern="cancel"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
-    print("Cynema Premium Bot running...")
+    print("🔥 Cynema Premium Bot running...")
     app.run_polling()
 
 if __name__=="__main__":
