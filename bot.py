@@ -1,4 +1,4 @@
-import json, requests, random, asyncio
+import json, aiohttp, asyncio, random
 from datetime import datetime
 from telegram import *
 from telegram.ext import *
@@ -17,15 +17,17 @@ def load_db():
     return db
 
 def save_db():
-    json.dump(db, open(DB_FILE, "w"), indent=4)
+    json.dump(db, open(DB_FILE,"w"), indent=4)
 
 load_db()
 
-# --------- TMDB Search ----------
-def search_movie(name, type_="movie"):
+# --------- Async TMDB Search ----------
+async def search_movie(name, type_="movie"):
     endpoint = "search/tv" if type_=="webseries" else "search/movie"
     url = f"https://api.themoviedb.org/3/{endpoint}?api_key={TMDB_API_KEY}&query={name}"
-    r = requests.get(url).json()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as r:
+            r = await r.json()
     results = []
     for m in r.get("results", [])[:5]:
         results.append({
@@ -44,12 +46,27 @@ async def check_join(user_id, context):
             return False
     return True
 
-# --------- Start ----------
+# --------- Start & Referral ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
+    args = context.args
+    referred_id = None
+    if args and args[0].startswith("ref_"):
+        referred_id = args[0].replace("ref_","")
+
     if user_id not in db["users"]:
-        db["users"][user_id] = {"coins":2,"bonus":0,"referrals":0,"joined":str(datetime.now().date()),"history":[],"watchlist":[]}
-        save_db()
+        db["users"][user_id] = {"coins":2,"bonus":0,"referrals":0,"joined":str(datetime.now().date()),"history":[],"watchlist":[],"referred_by":None}
+
+        # Unique referral logic
+        if referred_id and referred_id != user_id and db["users"][user_id]["referred_by"] is None:
+            db["users"][user_id]["referred_by"] = referred_id
+            db["users"][referred_id]["referrals"] += 1
+            db["users"][referred_id]["bonus"] += 3
+            if referred_id not in db["referrals"]:
+                db["referrals"][referred_id] = []
+            db["referrals"][referred_id].append(user_id)
+
+    save_db()
 
     poster_text = f"""╔══════════════════════════════════╗
 ║  🎬✨  C Y N E M A  B O T       ║
@@ -160,13 +177,10 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "request"
         return
 
-    # ---- Handle searches with "processing" animation ----
+    # ---- Handle searches with async processing ----
     if mode in ["movie","anime","webseries"]:
-        msg = await update.message.reply_text("⚡ Processing your search...")
-        await asyncio.sleep(1)
-        await msg.edit_text("⚡ Searching in Cynema Database...")
-        await asyncio.sleep(1)
-        results = search_movie(text, mode)
+        msg = await update.message.reply_text("⚡ Searching in Cynema Database...")
+        results = await search_movie(text, mode)
         if not results:
             await msg.edit_text("❌ No results found!")
             return
@@ -186,8 +200,11 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     q = update.callback_query
     data = q.data
     _, type_, id_ = data.split("_")
+    # Fetch info from TMDB async
     url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
-    r = requests.get(url).json()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as r:
+            r = await r.json()
     title = r.get("title") or r.get("name")
     vote = r.get("vote_average","N/A")
     poster = f"https://image.tmdb.org/t/p/w500{r['poster_path']}" if r.get("poster_path") else POSTER_URL
@@ -218,7 +235,7 @@ def main():
     app.add_handler(CallbackQueryHandler(selection_callback, pattern="sel_"))
     app.add_handler(CallbackQueryHandler(cancel, pattern="cancel"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
-    print("🔥 Cynema Premium Bot running...")
+    print("🔥 Cynema Premium Fast Bot running...")
     app.run_polling()
 
 if __name__=="__main__":
