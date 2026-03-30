@@ -94,11 +94,25 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = ReplyKeyboardMarkup([
         ["🎬 Movies", "🌸 Anime"],
         ["📺 Web Series", "👥 Invite"],
-        ["📊 Stats", "📩 Request"]
+        ["📊 My Stats", "📩 Movie Request"]
     ], resize_keyboard=True)
 
-    await q.message.reply_text("🎉 Welcome!", reply_markup=kb)
+    await q.message.reply_photo(
+    START_IMG,
+    caption="""╔══════════════════════════════════╗
+║  🎬  C Y N E M A   M E N U       ║
+╚══════════════════════════════════╝
 
+Choose what you want to find:
+
+🎬 Movies — Any movie in any language  
+🌸 Anime — Subbed, dubbed, all seasons  
+📺 Web Series — Netflix, Prime, Disney+  
+
+Use the keyboard buttons below to navigate! 👇
+""",
+    reply_markup=kb
+)
 # ---------- TMDB SEARCH ----------
 async def search_tmdb(query):
     url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
@@ -128,20 +142,55 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if txt == "📊 Stats":
-        u = db["users"][uid]
-        total = u["search"] + u["bonus"]
+    u = db["users"][uid]
+    total = u["search"] + u["bonus"]
 
-        await update.message.reply_text(
-            f"📊 Stats\n\n👤 {u['name']}\n🔍 {total}\n🎁 {u['bonus']}\n👥 {u['ref']}"
-        )
-        return
+    text = f"""╔══════════════════════════════════╗
+║  📊  Y O U R  S T A T S          ║
+╚══════════════════════════════════╝
+
+👤 Name      : {u['name']}
+🆔 User ID   : {uid}
+🔍 Searches  : {total} remaining
+  ├ 🆓 Free  : {u['search']}
+  └ 🎁 Bonus : {u['bonus']}
+👥 Referrals : {u['ref']} friends
+📅 Joined    : {u['joined']}
+"""
+
+    await update.message.reply_text(text)
+    return
 
     if txt == "👥 Invite":
-        bot_username = (await context.bot.get_me()).username
-        link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    bot_username = (await context.bot.get_me()).username
+    link = f"https://t.me/{bot_username}?start=ref_{uid}"
 
-        await update.message.reply_text(f"Invite & Earn:\n{link}")
-        return
+    u = db["users"][uid]
+    total = u["search"] + u["bonus"]
+
+    text = f"""╔══════════════════════════════════╗
+║  👥  R E F E R R A L             ║
+╚══════════════════════════════════╝
+
+🔗 Your Invite Link:
+{link}
+
+📊 Stats:
+├ 👫 Friends Invited : {u['ref']}
+├ 🎁 Bonus Searches  : {u['bonus']}
+├ 🔍 Searches Left   : {total}
+└ 🎯 Next Reward At  : 2 invites
+
+💡 Every 2 invites = +3 bonus searches ♾️
+"""
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Copy Link", url=link)],
+        [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={link}")]
+    ])
+
+    await update.message.reply_text(text, reply_markup=kb)
+    return
 
     if txt == "📩 Request":
         context.user_data["mode"] = "req"
