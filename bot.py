@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save(db)
 
     text = f"""╔══════════════════════════════════╗
-║  🎬✨  C I N E V E R S E  B O T  ║
+║  🎬✨   C Y N E M A  B O T  ║
 ╚══════════════════════════════════╝
 
 Hey {name}! 👋 Welcome to the Ultimate Media Bot!
