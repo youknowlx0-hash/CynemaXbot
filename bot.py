@@ -1,4 +1,5 @@
-import json, aiohttp, datetime
+import json, aiohttp, asyncio
+from datetime import datetime
 from telegram import *
 from telegram.ext import *
 from config import *
@@ -6,35 +7,42 @@ from config import *
 DB_FILE = "db.json"
 
 # ---------- DB ----------
-def load():
+def load_db():
     try:
         return json.load(open(DB_FILE))
     except:
-        return {}
+        return {"users": {}, "referrals": {}}
 
-def save(db):
-    json.dump(db, open(DB_FILE, "w"), indent=4)
+def save_db(db):
+    json.dump(db, open(DB_FILE,"w"), indent=4)
 
-db = load()
+db = load_db()
 
-def user_init(uid, name):
-    if uid not in db:
-        db[uid] = {
-            "name": name,
-            "referrals": 0,
-            "invited": [],
-            "searches": START_SEARCHES,
-            "bonus": 0,
-            "joined": str(datetime.date.today())
-        }
-        save(db)
+# ---------- TMDB SEARCH ----------
+async def search_tmdb(name, type_="movie"):
+    endpoint = "search/tv" if type_=="webseries" else "search/movie"
+    url = f"https://api.themoviedb.org/3/{endpoint}?api_key={TMDB_API_KEY}&query={name}"
 
-# ---------- FORCE JOIN CHECK ----------
-async def check_join(bot, user_id):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as r:
+            data = await r.json()
+
+    results = []
+    for m in data.get("results", [])[:5]:
+        results.append({
+            "id": m["id"],
+            "title": m.get("title") or m.get("name"),
+            "vote": m.get("vote_average","N/A"),
+            "poster": f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m.get("poster_path") else POSTER_URL
+        })
+    return results
+
+# ---------- FORCE JOIN ----------
+async def check_join(user_id, context):
     try:
-        for ch in FORCE_CHANNELS:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in ["left", "kicked"]:
+        for ch in CHANNELS:
+            member = await context.bot.get_chat_member(ch, user_id)
+            if member.status in ["left","kicked"]:
                 return False
         return True
     except:
@@ -42,171 +50,160 @@ async def check_join(bot, user_id):
 
 # ---------- START ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = str(update.effective_user.id)
-    name = update.effective_user.first_name
-    user_init(user, name)
+    user_id = str(update.effective_user.id)
 
-    if not await check_join(context.bot, user):
-        buttons = [[InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FORCE_CHANNELS[0].replace('@','')}")],
-                   [InlineKeyboardButton("✅ Verify", callback_data="verify")]]
-        await update.message.reply_text("❗ Join channel first", reply_markup=InlineKeyboardMarkup(buttons))
-        return
+    if user_id not in db["users"]:
+        db["users"][user_id] = {
+            "coins":2,"bonus":0,"referrals":0,
+            "joined":str(datetime.now().date()),
+            "referred_by":None
+        }
 
-    text = f"""
-╔══════════════════════════════════╗
-║ 🎬  C Y N E M A
+    save_db(db)
+
+    text = f"""╔══════════════════════════════════╗
+║ 🎬 C Y N E M A  B O T
 ╚══════════════════════════════════╝
 
-Hey {name}! 👋
+Hey {update.effective_user.first_name}! 👋
 
-🎬 Movies | 🌸 Anime | 📺 Series  
-
-👇 Select option:
+📌 Join channels & Verify 👇
 """
 
-    kb = [
-        [InlineKeyboardButton("🎬 Movies", callback_data="movies")],
-        [InlineKeyboardButton("📩 Request", callback_data="request")],
-        [InlineKeyboardButton("👥 Invite", callback_data="invite")],
-        [InlineKeyboardButton("📊 Stats", callback_data="stats")]
-    ]
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Verify", callback_data="verify")],
+        [InlineKeyboardButton("📺 Channel 1", url=f"https://t.me/{CHANNELS[0][1:]}"),
+         InlineKeyboardButton("📺 Channel 2", url=f"https://t.me/{CHANNELS[1][1:]}")]
+    ])
 
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_photo(POSTER_URL, caption=text, reply_markup=kb)
 
-
-# ---------- SEARCH ----------
-async def search_tmdb(query):
-    url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={query}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as r:
-            data = await r.json()
-    return data.get("results", [])
-
-
-# ---------- BUTTONS ----------
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- VERIFY ----------
+async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
-    user = str(q.from_user.id)
+    user_id = str(q.from_user.id)
 
-    if q.data == "verify":
-        if await check_join(context.bot, user):
-            await q.message.delete()
-            await start(update, context)
-        else:
-            await q.answer("Join first!", show_alert=True)
-
-    elif q.data == "movies":
-        context.user_data["mode"] = "search"
-        await q.message.reply_text("🎬 Send movie name:")
-
-    elif q.data == "request":
-        context.user_data["mode"] = "request"
-        await q.message.reply_text("📩 Send movie name to request:")
-
-    elif q.data == "invite":
-        link = f"https://t.me/YOUR_BOT_USERNAME?start=ref_{user}"
-        await q.message.reply_text(f"🔗 {link}")
-
-    elif q.data == "stats":
-        u = db[user]
-        await q.message.reply_text(f"👤 {u['name']}\n🔍 {u['searches']+u['bonus']} searches\n👥 {u['referrals']} referrals")
-
-    elif q.data == "cancel":
-        context.user_data.clear()
-        await q.message.delete()
-
-
-# ---------- MESSAGE ----------
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = str(update.effective_user.id)
-    text = update.message.text
-
-    mode = context.user_data.get("mode")
-
-    # REQUEST MODE
-    if mode == "request":
-        await context.bot.send_message(ADMIN_ID, f"📩 Request: {text}\nUser: {user}")
-        await update.message.reply_text("✅ Request sent to admin")
-        context.user_data.clear()
+    if not await check_join(user_id, context):
+        await q.answer("Join channels first ❌")
         return
 
-    # SEARCH MODE
-    if mode == "search":
-        msg = await update.message.reply_text("🔍 Searching...")
+    await q.answer("Verified ✅")
 
-        results = await search_tmdb(text)
+    buttons = [
+        ["🎬 Movies","🌸 Anime"],
+        ["📺 Web Series","👥 Invite"],
+        ["📊 Stats","📩 Request"]
+    ]
+
+    await q.message.reply_text("Select option 👇", reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True))
+
+# ---------- MENU ----------
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = str(update.effective_user.id)
+
+    if text == "🎬 Movies":
+        context.user_data["mode"] = "movie"
+        await update.message.reply_text("Send movie name:")
+        return
+
+    if text == "🌸 Anime":
+        context.user_data["mode"] = "anime"
+        await update.message.reply_text("Send anime name:")
+        return
+
+    if text == "📺 Web Series":
+        context.user_data["mode"] = "webseries"
+        await update.message.reply_text("Send series name:")
+        return
+
+    if text == "📩 Request":
+        context.user_data["mode"] = "request"
+        await update.message.reply_text("Send request name:")
+        return
+
+    if text == "📊 Stats":
+        u = db["users"][user_id]
+        await update.message.reply_text(f"Search: {u['coins']} | Referrals: {u['referrals']}")
+        return
+
+    # ---------- SEARCH ----------
+    mode = context.user_data.get("mode")
+
+    if mode in ["movie","anime","webseries"]:
+        msg = await update.message.reply_text("🔍 Searching...")
+        results = await search_tmdb(text, mode)
 
         if not results:
-            await msg.edit_text("❌ No results found!")
+            await msg.edit_text("No results ❌")
             return
 
         buttons = []
-        out = f"🎯 Results for '{text}':\n\n"
+        for r in results:
+            buttons.append([
+                InlineKeyboardButton(r['title'], callback_data=f"sel_{mode}_{r['id']}"),
+                InlineKeyboardButton("❌", callback_data=f"cancel")
+            ])
 
-        for r in results[:10]:
-            out += f"• {r['title']}\n"
-            buttons.append([InlineKeyboardButton(r['title'], callback_data=f"movie_{r['id']}")])
+        await msg.edit_text("Select movie 👇", reply_markup=InlineKeyboardMarkup(buttons))
 
-        buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+    # ---------- REQUEST ----------
+    if mode == "request":
+        await context.bot.send_message(ADMIN_ID, f"Request: {text}")
+        await update.message.reply_text("Sent ✅")
+        context.user_data.clear()
 
-        await msg.edit_text(out, reply_markup=InlineKeyboardMarkup(buttons))
-
-
-# ---------- MOVIE ----------
-async def movie_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- SELECT ----------
+async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+    data = q.data
 
-    movie_id = q.data.split("_")[1]
+    if data == "cancel":
+        context.user_data.clear()
+        await q.message.delete()
+        return
 
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
+    _, type_, id_ = data.split("_")
+
+    url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}/{id_}?api_key={TMDB_API_KEY}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as r:
             m = await r.json()
 
-    title = m.get("title")
-    year = m.get("release_date","")[:4]
-    rating = m.get("vote_average")
-    overview = m.get("overview")
-
-    genres = ", ".join([g['name'] for g in m.get("genres", [])])
-
+    title = m.get("title") or m.get("name")
+    vote = m.get("vote_average","N/A")
     poster = f"https://image.tmdb.org/t/p/w500{m['poster_path']}"
 
-    caption = f"""
-╔══════════════════════════════════╗
-║ 🎬 {title}
-╚══════════════════════════════════╝
+    watch = f"{VIDLINK_BASE}{id_}"
 
-📅 Year : {year}
-⭐ Rating : {rating}/10
-🎭 Genres : {genres}
-
-📖 {overview[:300]}...
-
-👇 Watch below:
-"""
-
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Watch", url=f"{VIDLINK_BASE}{movie_id}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
-    ])
-
-    await q.message.reply_photo(photo=poster, caption=caption, reply_markup=kb)
-
+    await q.message.reply_photo(
+        photo=poster,
+        caption=f"🎬 {title}\n⭐ {vote}\n\nWatch 👇",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch", url=watch)],
+            [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
+        ])
+    )
 
 # ---------- MAIN ----------
-def main():
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # 🔥 FIX ERROR
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(movie_select, pattern="movie_"))
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.TEXT, message_handler))
+    app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
+    app.add_handler(CallbackQueryHandler(selection_callback, pattern="^(sel_|cancel)"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
 
     print("Bot Running 🚀")
-    app.run_polling()
 
-main()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    asyncio.run(main())
