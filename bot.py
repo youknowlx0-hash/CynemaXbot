@@ -74,11 +74,11 @@ Hey {name}! 👋
 """
 
     kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
-        [InlineKeyboardButton("📢 Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
+        [InlineKeyboardButton("📢 Join Channel 1",url=f"https://t.me/{CHANNELS[0][1:]}")],
+        [InlineKeyboardButton("📢 Join Channel 2",url=f"https://t.me/{CHANNELS[1][1:]}")],
         [
-            InlineKeyboardButton("🌐 Website",url=WEBSITE_URL),
-            InlineKeyboardButton("🎬 Movies",callback_data="movies")
+            InlineKeyboardButton("🌐 Instagram",url=WEBSITE_URL),
+            InlineKeyboardButton("💰 Earning Adda",url=MOVIES_URL)
         ],
         [InlineKeyboardButton("✅ VERIFY",callback_data="verify")]
     ])
@@ -97,23 +97,14 @@ async def verify(update:Update, context:ContextTypes.DEFAULT_TYPE):
     await q.answer("Verified ✅")
 
     kb=ReplyKeyboardMarkup([
-        ["🌸 Anime","📺 Web Series"],
-        ["👥 Invite","📊 Stats"],
-        ["📩 Request"]
+        ["🎬 Movies","🌸 Anime"],
+        ["📺 Web Series","👥 Invite"],
+        ["📊 Stats","📩 Request"]
     ],resize_keyboard=True)
 
     await q.message.reply_text("🎉 Welcome! Select option 👇",reply_markup=kb)
 
-# ---------- MOVIE BUTTON ----------
-async def movies_btn(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    context.user_data["mode"] = "movie"
-
-    await q.message.reply_text("🎬 Send Movie Name:")
-
-# ---------- TMDB ----------
+# ---------- TMDB SEARCH ----------
 async def search_tmdb(q):
     url=f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={q}"
     async with aiohttp.ClientSession() as s:
@@ -125,6 +116,11 @@ async def search_tmdb(q):
 async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
     uid=str(update.effective_user.id)
     txt=update.message.text
+
+    if txt=="🎬 Movies":
+        context.user_data["mode"]="movie"
+        await update.message.reply_text("🎬 Send Movie Name:")
+        return
 
     if txt=="🌸 Anime":
         context.user_data["mode"]="anime"
@@ -140,17 +136,13 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
         u=db["users"][uid]
         total=u["search"]+u["bonus"]
 
-        await update.message.reply_text(f"""╔══════════════════════════════════╗
-║  📊  Y O U R  S T A T S
-╚══════════════════════════════════╝
+        await update.message.reply_text(f"""📊 Your Stats
 
 👤 {u['name']}
 🆔 {uid}
 
-🔍 Searches Left: {total}
-  ├ 🆓 Free: {u['search']}
-  └ 🎁 Bonus: {u['bonus']}
-
+🔍 Searches: {total}
+🎁 Bonus: {u['bonus']}
 👥 Referrals: {u['ref']}
 📅 Joined: {u['joined']}
 """)
@@ -159,7 +151,6 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
     if txt=="👥 Invite":
         bot_username=(await context.bot.get_me()).username
         link=f"https://t.me/{bot_username}?start=ref_{uid}"
-
         u=db["users"][uid]
 
         await update.message.reply_text(f"""👥 Referral System
@@ -186,11 +177,7 @@ async def menu(update:Update, context:ContextTypes.DEFAULT_TYPE):
             bot_username=(await context.bot.get_me()).username
             link=f"https://t.me/{bot_username}?start=ref_{uid}"
 
-            await update.message.reply_text(f"""❌ No Credits Left!
-
-Invite friends:
-{link}
-""")
+            await update.message.reply_text(f"❌ No Credits!\nInvite:\n{link}")
             return
 
         res=await search_tmdb(txt)
@@ -227,43 +214,49 @@ async def select(update:Update, context:ContextTypes.DEFAULT_TYPE):
         await q.message.delete()
         return
 
-    if data=="movies":
-        return
-
     mid=data.split("_")[1]
 
+    # try movie
     url=f"https://api.themoviedb.org/3/movie/{mid}?api_key={TMDB_API_KEY}"
 
     async with aiohttp.ClientSession() as s:
         async with s.get(url) as r:
             m=await r.json()
 
+    # fallback tv
+    if "success" in m or not m.get("title"):
+        url=f"https://api.themoviedb.org/3/tv/{mid}?api_key={TMDB_API_KEY}"
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url) as r:
+                m=await r.json()
+
     title=m.get("title") or m.get("name")
-    year=(m.get("release_date") or "")[:4]
+    year=(m.get("release_date") or m.get("first_air_date") or "")[:4]
     rating=m.get("vote_average")
     overview=m.get("overview","")
 
     link=f"{VIDLINK_BASE}{mid}"
 
-    await q.message.reply_text(f"""🎬 {title} ({year})
+    await q.message.reply_text(
+        f"🎬 {title} ({year})\n\n⭐ {rating}\n\n📝 {overview[:200]}...\n\n🔗 {link}",
+        disable_web_page_preview=False
+    )
 
-⭐ {rating}
-
-📝 {overview[:250]}...
-
-🔗 {link}
-""")
+    # reset mode
+    context.user_data.clear()
 
 # ---------- MAIN ----------
 async def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app=Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
-    app.add_handler(CallbackQueryHandler(movies_btn, pattern="movies"))
+    app.add_handler(CommandHandler("start",start))
+    app.add_handler(CallbackQueryHandler(verify,pattern="verify"))
     app.add_handler(CallbackQueryHandler(select))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,menu))
 
-    print("🔥 Cynema Bot Running")
+    print("🔥 Bot Running")
 
     await app.run_polling()
+
+if __name__=="__main__":
+    asyncio.run(main())
