@@ -23,7 +23,8 @@ load_db()
 
 # --------- TMDB Search ----------
 def search_movie(name, type_="movie"):
-    url = f"https://api.themoviedb.org/3/{'tv' if type_=='webseries' else 'movie'}?api_key={TMDB_API_KEY}&query={name}"
+    endpoint = "search/tv" if type_=="webseries" else "search/movie"
+    url = f"https://api.themoviedb.org/3/{endpoint}?api_key={TMDB_API_KEY}&query={name}"
     r = requests.get(url).json()
     results = []
     for m in r.get("results", [])[:5]:
@@ -162,7 +163,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---- Handle searches with "processing" animation ----
     if mode in ["movie","anime","webseries"]:
         msg = await update.message.reply_text("⚡ Processing your search...")
-        await asyncio.sleep(1)  # simulate processing animation
+        await asyncio.sleep(1)
         await msg.edit_text("⚡ Searching in Cynema Database...")
         await asyncio.sleep(1)
         results = search_movie(text, mode)
