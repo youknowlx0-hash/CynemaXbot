@@ -5,7 +5,7 @@ TMDB_API_KEY = "ce822ebcfcfc1f92264713bb4306fdbd"
 VIDLINK_BASE = "https://vidlink.pro/movie/"
 
 FORCE_CHANNELS = ["@CynemaXOfficial", "@H3xShadow"]
-ADMIN_ID =   # apna telegram user id
+ADMIN_ID = 6813806104
 
 START_SEARCHES = 5
 REFERRAL_BONUS = 3
