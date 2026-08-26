@@ -133,6 +133,20 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     txt = update.message.text
 
+    # If admin is sending a broadcast message (triggered from admin panel)
+    if update.effective_user.id == ADMIN_ID and context.user_data.get("admin_action") == "broadcast":
+        msg = txt
+        count = 0
+        for u in list(db.get("users", {}).keys()):
+            try:
+                await context.bot.send_message(int(u), msg)
+                count += 1
+            except:
+                pass
+        context.user_data.pop("admin_action", None)
+        await update.message.reply_text(f"Broadcast sent to {count} users.")
+        return
+
     if txt == "🎬 Movies":
         context.user_data["mode"] = "movie"
         await update.message.reply_text("🎬 Send Movie Name:")
@@ -154,7 +168,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = f"""╔══════════════════════════════════╗
 ║  📊  Y O U R  S T A T S          ║
-╚══════════════════════��═══════════╝
+╚══════════════════════════════════╝
 
 👤 Name      : {u['name']}
 🆔 User ID   : {uid}
@@ -242,6 +256,9 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         save(db)
 
+        # store last results so "Back" can restore the selection
+        context.user_data["last_results"] = res
+
         btn = [[InlineKeyboardButton(i.get("title") or i.get("name"), callback_data=f"id_{i['id']}")] for i in res]
         btn.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
 
@@ -249,65 +266,172 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # REQUEST
     if context.user_data.get("mode") == "req":
-        await context.bot.send_message(ADMIN_ID, f"Request:\n{txt}")
+        # save request to db and notify admin
+        db.setdefault("requests", [])
+        db["requests"].append({
+            "user": uid,
+            "name": update.effective_user.first_name,
+            "text": txt,
+            "date": str(datetime.now())
+        })
+        save(db)
+
+        await context.bot.send_message(ADMIN_ID, f"Request:\nFrom: {update.effective_user.first_name} ({uid})\n{txt}")
         await update.message.reply_text("Sent")
+
+# ---------- ADMIN PANEL ----------
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # command handler for /admin
+    uid = update.effective_user.id
+    if uid != ADMIN_ID:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 View Requests", callback_data="admin_view_requests")],
+        [InlineKeyboardButton("📣 Broadcast", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📊 Stats", callback_data="admin_stats")],
+        [InlineKeyboardButton("❌ Close", callback_data="admin_close")]
+    ])
+
+    await update.message.reply_text("Admin Panel:", reply_markup=kb)
+
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    data = q.data
+
+    # only allow admin
+    if q.from_user.id != ADMIN_ID:
+        await q.answer("Unauthorized")
+        return
+
+    if data == "admin_close":
+        try:
+            await q.message.delete()
+        except:
+            pass
+        return
+
+    if data == "admin_view_requests":
+        requests = db.get("requests", [])
+        if not requests:
+            await q.answer()
+            await q.message.reply_text("No requests.")
+            return
+
+        text_lines = []
+        for i, r in enumerate(requests[-20:], 1):
+            text_lines.append(f"{i}. {r['name']} ({r['user']}) — {r['date']}\n{r['text']}")
+        text = "\n\n".join(text_lines)
+
+        await q.message.reply_text(f"Requests (latest {len(requests[-20:])}):\n\n{text}")
+        return
+
+    if data == "admin_broadcast":
+        # set flag so next message from admin is broadcast content
+        context.user_data["admin_action"] = "broadcast"
+        await q.message.reply_text("Send the message to broadcast to all users:")
+        return
+
+    if data == "admin_stats":
+        users = db.get("users", {})
+        total_users = len(users)
+        total_searches = 0
+        for u in users.values():
+            total_searches += u.get("search", 0) + u.get("bonus", 0)
+
+        await q.message.reply_text(f"Users: {total_users}\nTotal available searches: {total_searches}")
+        return
+
+    await q.answer()
 
 # ---------- SELECT ----------
 async def select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    data = q.data
+    data = q.data.strip()
 
     if data == "cancel":
         context.user_data.clear()
         await q.message.delete()
         return
 
-    mid = data.split("_")[1]
+    # handle back -> restore selection list
+    if data.startswith("back"):
+        last = context.user_data.get("last_results")
+        if not last:
+            await q.answer("No previous results available.")
+            return
 
-    # movie
-    url = f"https://api.themoviedb.org/3/movie/{mid}?api_key={TMDB_API_KEY}"
-    async with aiohttp.ClientSession() as s:
-        async with s.get(url) as r:
-            m = await r.json()
+        btn = [[InlineKeyboardButton(i.get("title") or i.get("name"), callback_data=f"id_{i['id']}")] for i in last]
+        btn.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
 
-    # fallback tv
-    if not m.get("title"):
-        url = f"https://api.themoviedb.org/3/tv/{mid}?api_key={TMDB_API_KEY}"
+        # delete current detail message and show selection again
+        try:
+            await q.message.delete()
+        except:
+            pass
+        await q.message.reply_text("Select:", reply_markup=InlineKeyboardMarkup(btn))
+        return
+
+    if data.startswith("id_"):
+        mid = data.split("_")[1]
+
+        # movie
+        url = f"https://api.themoviedb.org/3/movie/{mid}?api_key={TMDB_API_KEY}"
         async with aiohttp.ClientSession() as s:
             async with s.get(url) as r:
                 m = await r.json()
 
-    title = m.get("title") or m.get("name")
-    year = (m.get("release_date") or m.get("first_air_date") or "")[:4]
-    rating = m.get("vote_average")
-    overview = m.get("overview", "")
+        # fallback tv
+        if not m.get("title"):
+            url = f"https://api.themoviedb.org/3/tv/{mid}?api_key={TMDB_API_KEY}"
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url) as r:
+                    m = await r.json()
 
-    link = f"{VIDLINK_BASE}{mid}"
+        title = m.get("title") or m.get("name")
+        year = (m.get("release_date") or m.get("first_air_date") or "")[:4]
+        rating = m.get("vote_average")
+        overview = m.get("overview", "")
 
-    # Try to get an image (poster or backdrop) from TMDB
-    poster_path = m.get("poster_path") or m.get("backdrop_path")
-    image_url = None
-    if poster_path:
-        image_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+        # construct vidlink for the Watch Now button (do NOT include it in the caption)
+        vid_link = f"{VIDLINK_BASE}{mid}"
 
-    caption = (
-        f"🎬 {title} ({year})\n⭐ {rating}\n\n{overview[:200]}...\n\n🔗 {link}"
-    )
+        # Try to get an image (poster or backdrop) from TMDB
+        poster_path = m.get("poster_path") or m.get("backdrop_path")
+        image_url = None
+        if poster_path:
+            image_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
 
-    if image_url:
-        # send image with caption
-        await q.message.reply_photo(image_url, caption=caption)
-    else:
-        await q.message.reply_text(caption)
+        caption = (
+            f"🎬 {title} ({year})\n⭐ {rating}\n\n{overview[:200]}..."
+        )
 
-    context.user_data.clear()
+        # inline buttons: Watch Now (url) and Back (callback)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch Now", url=vid_link)],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"back")]
+        ])
+
+        if image_url:
+            # send image with caption and inline buttons
+            await q.message.reply_photo(image_url, caption=caption, reply_markup=kb)
+        else:
+            await q.message.reply_text(caption, reply_markup=kb)
+
+        return
+
+    # fallback: unknown callback
+    await q.answer()
 
 # ---------- MAIN ----------
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
     app.add_handler(CallbackQueryHandler(select))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu))
 
