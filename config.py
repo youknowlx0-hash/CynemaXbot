@@ -1,4 +1,4 @@
-BOT_TOKEN = "8990984656:AAHQoDujHrKtEDGuR5wRJRRsfXv5V5eI36Y"
+BOT_TOKEN = "8990984656:AAFv7bX3RjIvBG6dTgFh3-JYaFAlPGNpmJc"
 TMDB_API_KEY = "ce822ebcfcfc1f92264713bb4306fdbd"
 
 CHANNELS = ["@VenomTricksOfficial","@webSeriesUpdater"]
