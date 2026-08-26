@@ -5,7 +5,7 @@ CHANNELS = ["@VenomTricksOfficial","@webSeriesUpdater"]
 ADMIN_ID = 7702942505
 
 WEBSITE_URL = "https://www.instagram.com/pvtluckylx?"
-MOVIES_URL = ""   # 🎬 yaha apna link daal
+MOVIES_URL = "https://t.me/+vRmZOpfrrYFjOGU1"   # 🎬 yaha apna link daal
 START_IMG = "https://ibb.co/NnSfgW2M"
 
 VIDLINK_BASE = "https://vidlink.pro/movie/"
