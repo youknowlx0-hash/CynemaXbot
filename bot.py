@@ -154,7 +154,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = f"""╔══════════════════════════════════╗
 ║  📊  Y O U R  S T A T S          ║
-╚══════════════════════════════════╝
+╚══════════════════════��═══════════╝
 
 👤 Name      : {u['name']}
 🆔 User ID   : {uid}
@@ -284,9 +284,21 @@ async def select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     link = f"{VIDLINK_BASE}{mid}"
 
-    await q.message.reply_text(
+    # Try to get an image (poster or backdrop) from TMDB
+    poster_path = m.get("poster_path") or m.get("backdrop_path")
+    image_url = None
+    if poster_path:
+        image_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+
+    caption = (
         f"🎬 {title} ({year})\n⭐ {rating}\n\n{overview[:200]}...\n\n🔗 {link}"
     )
+
+    if image_url:
+        # send image with caption
+        await q.message.reply_photo(image_url, caption=caption)
+    else:
+        await q.message.reply_text(caption)
 
     context.user_data.clear()
 
